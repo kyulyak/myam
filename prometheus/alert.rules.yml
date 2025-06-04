@@ -1,0 +1,47 @@
+groups:
+- name: system_alerts
+  rules:
+  - alert: HighCPUUsage
+    expr: 100 - (avg by(instance)(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage on {{ $labels.instance }}"
+      description: "CPU usage is {{ $value }}%"
+
+  - alert: HighMemoryUsage
+    expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage on {{ $labels.instance }}"
+      description: "Memory usage is {{ $value }}%"
+
+  - alert: LowDiskSpace
+    expr: (node_filesystem_avail_bytes{mountpoint="/"} * 100) / node_filesystem_size_bytes{mountpoint="/"} < 10
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Low disk space on {{ $labels.instance }}"
+      description: "Only {{ $value }}% space left on {{ $labels.mountpoint }}"
+
+  - alert: HighPostgresConnections
+    expr: pg_stat_activity_count > 50
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High PostgreSQL connections on {{ $labels.instance }}"
+      description: "{{ $value }} active connections"
+
+  - alert: BusinessCriticalAlert
+    expr: sum(rate(pg_stat_user_tables_n_tup_ins[5m])) < 1
+    for: 1h
+    labels:
+      severity: critical
+    annotations:
+      summary: "No new data inserted in the last hour"
+      description: "Data insertion rate is {{ $value }} rows per second"

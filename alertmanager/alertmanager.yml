@@ -1,0 +1,21 @@
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 3h
+  receiver: 'telegram'
+
+receivers:
+- name: 'telegram'
+  telegram_configs:
+  - api_url: "https://api.telegram.org"
+    bot_token: "7889598933:AAEOfkmrYhpFptauvOFbylgiCqxEmXVHMHM"
+    chat_id: 1028205523
+    send_resolved: true
+
+inhibit_rules:
+- source_match:
+    severity: 'critical'
+  target_match:
+    severity: 'warning'
+  equal: ['alertname']
