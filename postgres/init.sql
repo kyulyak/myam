@@ -102,3 +102,109 @@ CREATE TABLE users_analytics.streaming_data (
     FOREIGN KEY (track_id, album_id) REFERENCES artist_content.tracks(track_id, album_id)
 );
 
+-- Создание горизонтальных шардов
+
+-- Шардирование таблицы tracks по artist_id
+CREATE TABLE artist_content.tracks_artist_even (
+    CHECK (artist_id % 2 = 0)
+) INHERITS (artist_content.tracks);
+
+CREATE TABLE artist_content.tracks_artist_odd (
+    CHECK (artist_id % 2 = 1)
+) INHERITS (artist_content.tracks);
+
+-- Функция для маршрутизации вставок в tracks
+CREATE OR REPLACE FUNCTION tracks_insert_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (NEW.artist_id % 2 = 0) THEN
+        INSERT INTO artist_content.tracks_artist_even VALUES (NEW.*);
+    ELSE
+        INSERT INTO artist_content.tracks_artist_odd VALUES (NEW.*);
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Триггер для вставки
+CREATE TRIGGER insert_tracks_trigger
+BEFORE INSERT ON artist_content.tracks
+FOR EACH ROW EXECUTE FUNCTION tracks_insert_trigger();
+
+-- Шардирование таблицы sales по дате
+CREATE TABLE sales_finance.sales_2023 (
+    CHECK (sale_date >= '2023-01-01' AND sale_date < '2024-01-01')
+) INHERITS (sales_finance.sales);
+
+CREATE TABLE sales_finance.sales_2024 (
+    CHECK (sale_date >= '2024-01-01' AND sale_date < '2025-01-01')
+) INHERITS (sales_finance.sales);
+
+-- Функция для маршрутизации вставок в sales
+CREATE OR REPLACE FUNCTION sales_insert_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (NEW.sale_date >= '2023-01-01' AND NEW.sale_date < '2024-01-01') THEN
+        INSERT INTO sales_finance.sales_2023 VALUES (NEW.*);
+    ELSIF (NEW.sale_date >= '2024-01-01' AND NEW.sale_date < '2025-01-01') THEN
+        INSERT INTO sales_finance.sales_2024 VALUES (NEW.*);
+    ELSE
+        RAISE EXCEPTION 'Date out of range. Fix the sales_insert_trigger() function!';
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Триггер для вставки
+CREATE TRIGGER insert_sales_trigger
+BEFORE INSERT ON sales_finance.sales
+FOR EACH ROW EXECUTE FUNCTION sales_insert_trigger();
+
+-- Шардирование таблицы streaming_data по географии
+CREATE TABLE users_analytics.streaming_europe (
+    CHECK (country IN ('DE', 'FR', 'UK', 'IT', 'ES', 'NL', 'SE', 'PL', 'RU', 'UA'))
+) INHERITS (users_analytics.streaming_data);
+
+CREATE TABLE users_analytics.streaming_americas (
+    CHECK (country IN ('US', 'CA', 'BR', 'MX', 'AR', 'CO', 'CL', 'PE'))
+) INHERITS (users_analytics.streaming_data);
+
+-- Функция для маршрутизации вставок в streaming_data
+CREATE OR REPLACE FUNCTION streaming_data_insert_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (NEW.country IN ('DE', 'FR', 'UK', 'IT', 'ES', 'NL', 'SE', 'PL', 'RU', 'UA')) THEN
+        INSERT INTO users_analytics.streaming_europe VALUES (NEW.*);
+    ELSIF (NEW.country IN ('US', 'CA', 'BR', 'MX', 'AR', 'CO', 'CL', 'PE')) THEN
+        INSERT INTO users_analytics.streaming_americas VALUES (NEW.*);
+    ELSE
+        INSERT INTO users_analytics.streaming_data VALUES (NEW.*);
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Триггер для вставки
+CREATE TRIGGER insert_streaming_data_trigger
+BEFORE INSERT ON users_analytics.streaming_data
+FOR EACH ROW EXECUTE FUNCTION streaming_data_insert_trigger();
+
+-- Создание индексов для улучшения производительности
+
+-- Индексы для artist_content
+CREATE INDEX idx_artists_name ON artist_content.artists(name);
+CREATE INDEX idx_albums_artist ON artist_content.albums(artist_id);
+CREATE INDEX idx_tracks_album ON artist_content.tracks(album_id);
+CREATE INDEX idx_royalty_rates_artist ON artist_content.royalty_rates(artist_id);
+
+-- Индексы для sales_finance
+CREATE INDEX idx_sales_track ON sales_finance.sales(track_id, album_id);
+CREATE INDEX idx_sales_date ON sales_finance.sales(sale_date);
+CREATE INDEX idx_sales_platform ON sales_finance.sales(platform_id);
+CREATE INDEX idx_payments_artist ON sales_finance.payments(artist_id);
+
+-- Индексы для users_analytics
+CREATE INDEX idx_users_country ON users_analytics.users(country);
+CREATE INDEX idx_streaming_data_user ON users_analytics.streaming_data(user_id);
+CREATE INDEX idx_streaming_data_track ON users_analytics.streaming_data(track_id, album_id);
+CREATE INDEX idx_streaming_data_date ON users_analytics.streaming_data(stream_date);
