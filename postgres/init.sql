@@ -1,9 +1,5 @@
--- Создание базы данных
-CREATE DATABASE music_label;
-\c music_label
-
--- Домен 1: Артисты и контент
-CREATE SCHEMA artist_content;
+-- Создаем схему для артистов и контента
+CREATE SCHEMA IF NOT EXISTS artist_content;
 
 -- Таблица артистов
 CREATE TABLE artist_content.artists (
@@ -29,6 +25,7 @@ CREATE TABLE artist_content.albums (
 CREATE TABLE artist_content.tracks (
     track_id SERIAL,
     album_id INTEGER NOT NULL REFERENCES artist_content.albums(album_id),
+    artist_id INTEGER NOT NULL REFERENCES artist_content.artists(artist_id),
     title VARCHAR(100) NOT NULL,
     duration INTERVAL NOT NULL,
     is_single BOOLEAN DEFAULT FALSE,
@@ -43,8 +40,8 @@ CREATE TABLE artist_content.royalty_rates (
     effective_date DATE NOT NULL
 );
 
--- Домен 2: Продажи и финансы 
-CREATE SCHEMA sales_finance;
+-- Создаем схему для продаж и финансов
+CREATE SCHEMA IF NOT EXISTS sales_finance;
 
 -- Таблица платформ распространения
 CREATE TABLE sales_finance.platforms (
@@ -77,8 +74,8 @@ CREATE TABLE sales_finance.payments (
     period_end_date DATE NOT NULL
 );
 
--- Домен 3: Пользователи и аналитика 
-CREATE SCHEMA users_analytics;
+-- Создаем схему для пользователей и аналитики
+CREATE SCHEMA IF NOT EXISTS users_analytics;
 
 -- Таблица пользователей
 CREATE TABLE users_analytics.users (
@@ -98,11 +95,10 @@ CREATE TABLE users_analytics.streaming_data (
     platform_id INTEGER NOT NULL REFERENCES sales_finance.platforms(platform_id),
     stream_date TIMESTAMP NOT NULL,
     duration_played INTERVAL NOT NULL,
-    PRIMARY KEY (stream_id, country),
+    country VARCHAR(50) NOT NULL,
+    PRIMARY KEY (stream_id),
     FOREIGN KEY (track_id, album_id) REFERENCES artist_content.tracks(track_id, album_id)
 );
-
--- Создание горизонтальных шардов
 
 -- Шардирование таблицы tracks по artist_id
 CREATE TABLE artist_content.tracks_artist_even (
@@ -144,13 +140,27 @@ CREATE TABLE sales_finance.sales_2024 (
 CREATE OR REPLACE FUNCTION sales_insert_trigger()
 RETURNS TRIGGER AS $$
 BEGIN
+    -- Вставляем только негенерируемые столбцы
     IF (NEW.sale_date >= '2023-01-01' AND NEW.sale_date < '2024-01-01') THEN
-        INSERT INTO sales_finance.sales_2023 VALUES (NEW.*);
+        INSERT INTO sales_finance.sales_2023 (
+            sale_id, track_id, album_id, sale_date, 
+            platform_id, quantity, unit_price
+        ) VALUES (
+            NEW.sale_id, NEW.track_id, NEW.album_id, NEW.sale_date,
+            NEW.platform_id, NEW.quantity, NEW.unit_price
+        );
     ELSIF (NEW.sale_date >= '2024-01-01' AND NEW.sale_date < '2025-01-01') THEN
-        INSERT INTO sales_finance.sales_2024 VALUES (NEW.*);
+        INSERT INTO sales_finance.sales_2024 (
+            sale_id, track_id, album_id, sale_date, 
+            platform_id, quantity, unit_price
+        ) VALUES (
+            NEW.sale_id, NEW.track_id, NEW.album_id, NEW.sale_date,
+            NEW.platform_id, NEW.quantity, NEW.unit_price
+        );
     ELSE
         RAISE EXCEPTION 'Date out of range. Fix the sales_insert_trigger() function!';
     END IF;
+    
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -189,12 +199,13 @@ CREATE TRIGGER insert_streaming_data_trigger
 BEFORE INSERT ON users_analytics.streaming_data
 FOR EACH ROW EXECUTE FUNCTION streaming_data_insert_trigger();
 
--- Создание индексов для улучшения производительности
+-- Создаем индексы для улучшения производительности
 
 -- Индексы для artist_content
 CREATE INDEX idx_artists_name ON artist_content.artists(name);
 CREATE INDEX idx_albums_artist ON artist_content.albums(artist_id);
 CREATE INDEX idx_tracks_album ON artist_content.tracks(album_id);
+CREATE INDEX idx_tracks_artist ON artist_content.tracks(artist_id);
 CREATE INDEX idx_royalty_rates_artist ON artist_content.royalty_rates(artist_id);
 
 -- Индексы для sales_finance
@@ -208,13 +219,12 @@ CREATE INDEX idx_users_country ON users_analytics.users(country);
 CREATE INDEX idx_streaming_data_user ON users_analytics.streaming_data(user_id);
 CREATE INDEX idx_streaming_data_track ON users_analytics.streaming_data(track_id, album_id);
 CREATE INDEX idx_streaming_data_date ON users_analytics.streaming_data(stream_date);
+CREATE INDEX idx_streaming_data_country ON users_analytics.streaming_data(country);
 
-
-
--- Начинаем транзакцию для атомарного заполнения данных
+-- Заполняем таблицы данными
 BEGIN;
 
--- Заполняем таблицу артистов
+-- Артисты
 INSERT INTO artist_content.artists (name, genre, country, contract_start_date, contract_end_date) VALUES
 ('The Weeknd', 'R&B', 'Canada', '2012-01-01', '2025-12-31'),
 ('Taylor Swift', 'Pop', 'USA', '2010-06-01', '2026-06-01'),
@@ -227,7 +237,7 @@ INSERT INTO artist_content.artists (name, genre, country, contract_start_date, c
 ('Coldplay', 'Rock', 'UK', '2000-01-01', '2030-01-01'),
 ('Imagine Dragons', 'Rock', 'USA', '2012-07-01', '2025-07-01');
 
--- Заполняем таблицу альбомов
+-- Альбомы
 INSERT INTO artist_content.albums (artist_id, title, release_date, genre, total_tracks) VALUES
 (1, 'After Hours', '2020-03-20', 'R&B', 14),
 (1, 'Dawn FM', '2022-01-07', 'R&B', 16),
@@ -240,27 +250,27 @@ INSERT INTO artist_content.albums (artist_id, title, release_date, genre, total_
 (6, '30', '2021-11-19', 'Soul', 12),
 (7, '=', '2021-10-29', 'Pop', 14);
 
--- Заполняем таблицу треков (данные автоматически распределятся по шардам)
-INSERT INTO artist_content.tracks (album_id, title, duration, is_single) VALUES
-(1, 'Blinding Lights', '00:03:20', TRUE),
-(1, 'Save Your Tears', '00:03:35', TRUE),
-(1, 'In Your Eyes', '00:03:58', FALSE),
-(2, 'Take My Breath', '00:05:39', TRUE),
-(2, 'Sacrifice', '00:03:08', FALSE),
-(3, 'cardigan', '00:03:59', TRUE),
-(3, 'exile', '00:04:45', FALSE),
-(4, 'Anti-Hero', '00:03:20', TRUE),
-(4, 'Lavender Haze', '00:03:22', FALSE),
-(5, 'ON', '00:04:06', TRUE),
-(5, 'Black Swan', '00:03:18', FALSE),
-(6, 'Life Goes On', '00:03:27', TRUE),
-(7, 'Happier Than Ever', '00:04:58', TRUE),
-(7, 'Therefore I Am', '00:02:54', FALSE),
-(8, 'Way 2 Sexy', '00:04:17', TRUE),
-(9, 'Easy On Me', '00:03:44', TRUE),
-(10, 'Bad Habits', '00:03:51', TRUE);
+-- Треки (с указанием artist_id)
+INSERT INTO artist_content.tracks (album_id, artist_id, title, duration, is_single) VALUES
+(1, 1, 'Blinding Lights', '00:03:20', TRUE),
+(1, 1, 'Save Your Tears', '00:03:35', TRUE),
+(1, 1, 'In Your Eyes', '00:03:58', FALSE),
+(2, 1, 'Take My Breath', '00:05:39', TRUE),
+(2, 1, 'Sacrifice', '00:03:08', FALSE),
+(3, 2, 'cardigan', '00:03:59', TRUE),
+(3, 2, 'exile', '00:04:45', FALSE),
+(4, 2, 'Anti-Hero', '00:03:20', TRUE),
+(4, 2, 'Lavender Haze', '00:03:22', FALSE),
+(5, 3, 'ON', '00:04:06', TRUE),
+(5, 3, 'Black Swan', '00:03:18', FALSE),
+(6, 3, 'Life Goes On', '00:03:27', TRUE),
+(7, 4, 'Happier Than Ever', '00:04:58', TRUE),
+(7, 4, 'Therefore I Am', '00:02:54', FALSE),
+(8, 5, 'Way 2 Sexy', '00:04:17', TRUE),
+(9, 6, 'Easy On Me', '00:03:44', TRUE),
+(10, 7, 'Bad Habits', '00:03:51', TRUE);
 
--- Заполняем таблицу ставок роялти
+-- Ставки роялти
 INSERT INTO artist_content.royalty_rates (artist_id, rate_percentage, effective_date) VALUES
 (1, 15.00, '2020-01-01'),
 (2, 18.00, '2019-01-01'),
@@ -273,7 +283,7 @@ INSERT INTO artist_content.royalty_rates (artist_id, rate_percentage, effective_
 (9, 10.00, '2015-01-01'),
 (10, 12.00, '2020-01-01');
 
--- Заполняем таблицу платформ распространения
+-- Платформы распространения
 INSERT INTO sales_finance.platforms (platform_name, revenue_share_percentage) VALUES
 ('Spotify', 30.00),
 ('Apple Music', 25.00),
@@ -282,7 +292,7 @@ INSERT INTO sales_finance.platforms (platform_name, revenue_share_percentage) VA
 ('Deezer', 30.00),
 ('Tidal', 20.00);
 
--- Заполняем таблицу продаж (данные автоматически распределятся по шардам)
+-- Продажи
 INSERT INTO sales_finance.sales (track_id, album_id, sale_date, platform_id, quantity, unit_price) VALUES
 (1, 1, '2023-01-15 10:30:00', 1, 1000, 0.99),
 (1, 1, '2023-02-20 14:45:00', 2, 500, 1.29),
@@ -296,7 +306,7 @@ INSERT INTO sales_finance.sales (track_id, album_id, sale_date, platform_id, qua
 (9, 4, '2024-04-25 14:15:00', 3, 700, 0.79),
 (10, 5, '2024-05-30 12:00:00', 1, 1800, 0.99);
 
--- Заполняем таблицу выплат артистам
+-- Выплаты артистам
 INSERT INTO sales_finance.payments (artist_id, amount, payment_date, period_start_date, period_end_date) VALUES
 (1, 250000.00, '2023-03-01', '2023-01-01', '2023-02-28'),
 (2, 1800000.00, '2023-03-01', '2023-01-01', '2023-02-28'),
@@ -305,7 +315,7 @@ INSERT INTO sales_finance.payments (artist_id, amount, payment_date, period_star
 (4, 950000.00, '2023-06-01', '2023-03-01', '2023-05-31'),
 (5, 1500000.00, '2023-06-01', '2023-03-01', '2023-05-31');
 
--- Заполняем таблицу пользователей
+-- Пользователи
 INSERT INTO users_analytics.users (email, registration_date, country, age_group) VALUES
 ('user1@example.com', '2022-01-15', 'US', '18-25'),
 ('user2@example.com', '2022-02-20', 'UK', '26-35'),
@@ -318,24 +328,23 @@ INSERT INTO users_analytics.users (email, registration_date, country, age_group)
 ('user9@example.com', '2023-03-20', 'IT', '36-45'),
 ('user10@example.com', '2023-04-25', 'NL', '26-35');
 
--- Заполняем таблицу данных стриминга (данные автоматически распределятся по шардам)
-INSERT INTO users_analytics.streaming_data (track_id, album_id, user_id, platform_id, stream_date, duration_played) VALUES
-(1, 1, 1, 1, '2023-01-16 08:30:00', '00:03:20'),
-(1, 1, 2, 1, '2023-01-17 12:45:00', '00:03:20'),
-(2, 1, 3, 2, '2023-02-21 09:15:00', '00:03:35'),
-(3, 1, 4, 3, '2023-03-11 18:20:00', '00:03:58'),
-(4, 2, 5, 1, '2023-04-06 14:10:00', '00:05:39'),
-(5, 2, 6, 4, '2023-05-13 16:25:00', '00:03:08'),
-(6, 3, 7, 1, '2024-01-11 10:00:00', '00:03:59'),
-(7, 3, 8, 2, '2024-02-16 15:30:00', '00:04:45'),
-(8, 4, 9, 1, '2024-03-21 09:45:00', '00:03:20'),
-(9, 4, 10, 3, '2024-04-26 14:15:00', '00:03:22'),
-(10, 5, 1, 1, '2024-05-31 12:00:00', '00:04:06');
+-- Данные стриминга (с указанием страны)
+INSERT INTO users_analytics.streaming_data (track_id, album_id, user_id, platform_id, stream_date, duration_played, country) VALUES
+(1, 1, 1, 1, '2023-01-16 08:30:00', '00:03:20', 'US'),
+(1, 1, 2, 1, '2023-01-17 12:45:00', '00:03:20', 'UK'),
+(2, 1, 3, 2, '2023-02-21 09:15:00', '00:03:35', 'CA'),
+(3, 1, 4, 3, '2023-03-11 18:20:00', '00:03:58', 'DE'),
+(4, 2, 5, 1, '2023-04-06 14:10:00', '00:05:39', 'FR'),
+(5, 2, 6, 4, '2023-05-13 16:25:00', '00:03:08', 'BR'),
+(6, 3, 7, 1, '2024-01-11 10:00:00', '00:03:59', 'MX'),
+(7, 3, 8, 2, '2024-02-16 15:30:00', '00:04:45', 'ES'),
+(8, 4, 9, 1, '2024-03-21 09:45:00', '00:03:20', 'IT'),
+(9, 4, 10, 3, '2024-04-26 14:15:00', '00:03:22', 'NL'),
+(10, 5, 1, 1, '2024-05-31 12:00:00', '00:04:06', 'US');
 
--- Фиксируем транзакцию
 COMMIT;
 
--- Проверяем количество записей в основных таблицах
+-- Проверка данных
 SELECT 
     (SELECT COUNT(*) FROM artist_content.artists) AS artists_count,
     (SELECT COUNT(*) FROM artist_content.albums) AS albums_count,
