@@ -14,6 +14,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - monitoring_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Мониторинг
   prometheus:
@@ -22,7 +27,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - monitoring_net
     depends_on:
@@ -35,6 +40,9 @@ services:
     ports:
       - "3000:3000"
     volumes:
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     networks:
       - monitoring_net
@@ -61,15 +69,18 @@ services:
 
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter
-    container_name: postgres-exporter
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:postgres@postgres:5432/music_label?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://postgres:1111@postgres:5432/music_label?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres-exporter/queries.yml
     ports:
       - "9187:9187"
+    volumes:
+      - ./postgres-exporter/queries.yml:/etc/postgres-exporter/queries.yml:ro
     networks:
       - monitoring_net
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
 networks:
   monitoring_net:

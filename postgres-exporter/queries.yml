@@ -1,0 +1,76 @@
+platform_income:
+  query: |
+    SELECT 
+      platform_name as platform,
+      SUM(total_amount) as income
+    FROM sales_finance.sales
+    JOIN sales_finance.platforms ON sales.platform_id = platforms.platform_id
+    GROUP BY platform_name
+    ORDER BY income DESC
+  metrics:
+    - name: "music_platform_income"
+      help: "Total income by platform"
+      type: "gauge"
+      labels:
+        platform: "{{.platform}}"
+
+top_tracks:
+  query: |
+    SELECT 
+      t.title as track,
+      a.title as album,
+      ar.name as artist,
+      COUNT(sd.stream_id) as streams
+    FROM users_analytics.streaming_data sd
+    JOIN artist_content.tracks t ON sd.track_id = t.track_id AND sd.album_id = t.album_id
+    JOIN artist_content.albums a ON t.album_id = a.album_id
+    JOIN artist_content.artists ar ON a.artist_id = ar.artist_id
+    GROUP BY t.title, a.title, ar.name
+    ORDER BY streams DESC
+    LIMIT 5
+  metrics:
+    - name: "music_track_streams"
+      help: "Number of streams per track"
+      type: "gauge"
+      labels:
+        track: "{{.track}}"
+        album: "{{.album}}"
+        artist: "{{.artist}}"
+
+user_growth_by_month:
+  query: |
+    SELECT
+      DATE_TRUNC('month', registration_date) as month,
+      COUNT(*) as new_users,
+      SUM(COUNT(*)) OVER (ORDER BY DATE_TRUNC('month', registration_date)) as total_users
+    FROM users_analytics.users
+    GROUP BY month
+    ORDER BY month
+  metrics:
+    - name: "music_new_users_monthly"
+      help: "New users registered per month"
+      type: "gauge"
+      labels:
+        month: "{{.month}}"
+    - name: "music_total_users"
+      help: "Total users up to month"
+      type: "gauge"
+      labels:
+        month: "{{.month}}"
+
+streams_by_country:
+  query: |
+    SELECT
+      country,
+      COUNT(*) as streams
+    FROM users_analytics.streaming_data sd
+    JOIN users_analytics.users u ON sd.user_id = u.user_id
+    GROUP BY country
+    ORDER BY streams DESC
+    LIMIT 10
+  metrics:
+    - name: "music_streams_by_country"
+      help: "Number of streams by country"
+      type: "gauge"
+      labels:
+        country: "{{.country}}"

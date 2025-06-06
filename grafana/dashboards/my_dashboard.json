@@ -1,0 +1,59 @@
+{
+  "title": "Музыкальные метрики",
+  "panels": [
+    {
+      "title": "Доход по платформам",
+      "type": "barchart",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "query": "SELECT platform_name as \"Платформа\", SUM(total_amount) as \"Доход\" FROM sales_finance.sales JOIN sales_finance.platforms ON sales.platform_id = platforms.platform_id GROUP BY platform_name ORDER BY \"Доход\" DESC"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 6}
+    },
+    {
+      "title": "Топ-5 треков по прослушиваниям",
+      "type": "table",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "query": "SELECT t.title as \"Трек\", a.title as \"Альбом\", ar.name as \"Артист\", COUNT(sd.stream_id) as \"Прослушивания\" FROM users_analytics.streaming_data sd JOIN artist_content.tracks t ON sd.track_id = t.track_id AND sd.album_id = t.album_id JOIN artist_content.albums a ON t.album_id = a.album_id JOIN artist_content.artists ar ON a.artist_id = ar.artist_id GROUP BY t.title, a.title, ar.name ORDER BY \"Прослушивания\" DESC LIMIT 5"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 6}
+    },
+    {
+      "title": "Рост пользователей по месяцам",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "query": "SELECT DATE_TRUNC('month', registration_date) as \"Месяц\", COUNT(*) as \"Новые пользователи\", SUM(COUNT(*)) OVER (ORDER BY DATE_TRUNC('month', registration_date)) as \"Всего пользователей\" FROM users_analytics.users GROUP BY \"Месяц\" ORDER BY \"Месяц\""
+        }
+      ],
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 6}
+    },
+    {
+      "title": "Топ-10 стран по прослушиваниям",
+      "type": "piechart",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "query": "SELECT country as \"Страна\", COUNT(*) as \"Прослушивания\" FROM users_analytics.streaming_data sd JOIN users_analytics.users u ON sd.user_id = u.user_id GROUP BY country ORDER BY \"Прослушивания\" DESC LIMIT 10"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 18, "w": 12, "h": 6}
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "time_range",
+        "type": "interval",
+        "label": "Период",
+        "default": "1M"
+      }
+    ]
+  }
+}
